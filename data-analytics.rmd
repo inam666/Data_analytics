@@ -1,3 +1,4 @@
+# %% [code]
 
 ---
 title: "Divvy Cyclistic Case Study"
