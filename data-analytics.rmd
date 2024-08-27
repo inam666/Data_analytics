@@ -1,0 +1,467 @@
+
+---
+title: "Divvy Cyclistic Case Study"
+author: "Dr Inam ur Rehman"
+date: "`r Sys.Date()`"
+output: html_document
+extra_dependencies: ["inputenc", "fontspec"]
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse) #helps wrangle data
+# Use the conflicted package to manage conflicts
+library(conflicted)
+# Set dplyr::filter and dplyr::lag as the default choices
+conflict_prefer("filter", "dplyr")
+conflict_prefer("lag", "dplyr")
+
+```
+
+# A. ASK Phase
+
+## **1. Scenario**
+
+As a junior data analyst working on the marketing analyst team at Cyclistic, a bike-share company in Chicago. The director of marketing believes the company’s future success depends on maximizing the number of annual memberships. Therefore, marketing team wants to understand how casual riders and annual members use Cyclistic bikes differently. From these insights, design a new marketing strategy to convert casual riders into annual members. But first, Cyclistic executives must approve recommendations, so they must be backed up with compelling data insights and professional data visualizations.
+
+## **2. About the company**
+
+Lyft Bikes and Scooters, LLC (“Bikeshare”) operates the City of Chicago’s (“City”) Divvy bicycle sharing service. Bikeshare and the City are committed to supporting bicycling as an alternative transportation option. In 2016, Cyclistic launched a successful bike-share offering. Since then, the program has grown to a fleet of 5,824 bicycles that are geotracked and locked into a network of 692 stations across Chicago. The bikes can be unlocked from one station and returned to any other station in the system anytime.
+
+## **3. Data License Agreement**
+
+City permits Bikeshare to make certain Divvy system data owned by the City (“Data”) available to the public, subject to the terms and conditions of this License Agreement (“Agreement”). By accessing or using any of the Data, you agree to all of the terms and conditions of this Agreement.
+
+**License**. Bikeshare hereby grants us a non-exclusive, royalty-free, limited, perpetual license to access, reproduce, analyze, copy, modify, distribute in your product or service and use the Data for any lawful purpose (“License”). <https://www.divvybikes.com/data-license-agreement>
+
+## **4. Characters and teams**
+
+ **Cyclistic:** A bike-share program that features more than 5,800 bicycles and 600 docking stations. Cyclistic users are more likely to ride for leisure, but about 30% use the bikes to commute to work each day.
+
+ **Lily Moreno:** The director of marketing and my manager. Moreno is responsible for the development of campaigns and initiatives to promote the bike-share program.These may include email, social media, and other channels.
+
+ **Cyclistic marketing analytics team:** A team of data analysts who are responsible for collecting, analyzing, and reporting data that helps guide Cyclistic marketing strategy. I joined this team six months ago and have been busy learning about Cyclistic’s mission and business goals—as well as how I, as a junior data analyst, can help Cyclistic achieve them.
+
+ **Cyclistic executive team:** The notoriously detail-oriented executive team will decide whether to approve the recommended marketing program.
+
+## **5. Business Task**
+
+Design a new marketing strategy to convert casual riders into annual members.
+
+# B.Prepare Phase
+
+**STEP 1: Load Packages & COLLECT DATA**
+
+Load Packages
+
+```{r}
+library(readr)
+library(janitor)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(tibble)
+library(ggpubr)
+library(here)
+```
+
+Upload Divvy data-sets (csv files)
+
+```{r message=FALSE, warning=FALSE}
+q1_2019 <- read_csv("/kaggle/input/divvy-trips-2019-q1/Divvy_Trips_2019_Q1.csv")
+q1_2020 <- read_csv("/kaggle/input/divvy-trips-2020-q1/Divvy_Trips_2020_Q1.csv")
+```
+
+**STEP 2: WRANGLE DATA AND COMBINE INTO A SINGLE FILE**
+
+Compare column names each of the files
+
+```{r echo=TRUE}
+colnames(q1_2019)
+colnames(q1_2020)
+```
+
+Rename columns to make them consistent with q1_2020
+
+```{r}
+
+(q1_2019 <- rename(q1_2019
+,ride_id = trip_id
+,rideable_type = bikeid
+,started_at = start_time
+,ended_at = end_time
+,start_station_name = from_station_name
+,start_station_id = from_station_id
+,end_station_name = to_station_name
+,end_station_id = to_station_id
+,member_casual = usertype
+))
+```
+
+Inspect the dataframes and look for incongruencies
+
+```{r}
+
+str(q1_2019)
+str(q1_2020)
+
+```
+
+ride_id and rideable_type are numeric in q1_2019, so we convert ride_id and rideable_type to character so that they can stack correctly with q1_2020 data frame.
+
+```{r}
+
+q1_2019 <- mutate(q1_2019, ride_id = as.character(ride_id)
+,rideable_type = as.character(rideable_type))
+```
+
+Stack individual quarter's data frames into one big data frame
+
+```{r}
+
+all_trips <- bind_rows(q1_2019, q1_2020)
+glimpse(all_trips)
+```
+
+Remove lat, long, birthyear, and gender fields as they are not required in current study.
+
+```{r}
+all_trips <- all_trips %>%
+select(-c(start_lat, start_lng, end_lat, end_lng, birthyear, gender, tripduration))
+glimpse(all_trips)
+```
+
+**STEP 3: CLEAN UP AND ADD DATA TO PREPARE FOR ANALYSIS**
+
+Inspect the new table that has been created
+
+```{r}
+
+colnames(all_trips) #List of column names
+nrow(all_trips) #How many rows are in data frame?
+dim(all_trips) #Dimensions of the data frame?
+head(all_trips) #See the first 6 rows of data frame.
+tail(all_trips)  #See the last 6 rows of data frame.
+
+```
+
+See list of columns and data types (numeric, character, etc)
+
+```{r}
+str(all_trips) 
+```
+
+Statistical summary of data. Mainly for numerics
+
+```{r}
+summary(all_trips) 
+```
+
+In the "member_casual" column, there are two names for members ("member" and "Subscriber") and two names for casual riders ("Customer" and "casual"). We will need to consolidate that from four to two labels. Seeing how many observations fall under each usertype
+
+```{r echo=TRUE}
+
+table(all_trips$member_casual)
+```
+
+In the "member_casual" column, replace "Subscriber" with "member" and "Customer" with "casual"
+
+```{r}
+
+all_trips <- all_trips %>%
+mutate(member_casual = recode(member_casual
+,"Subscriber" = "member"
+,"Customer" = "casual"))
+```
+
+Check to make sure the proper number of observations were reassigned
+
+```{r}
+
+table(all_trips$member_casual)
+
+```
+
+Add columns that list the date, month, day, and year of each ride This will allow us to aggregate ride data for each month, day, or year ... before completing these operations we could only aggregate at the ride level \# <https://www.statmethods.net/input/dates.html> more on date formats in R found at that link
+
+```{r}
+all_trips$date <- as.Date(all_trips$started_at) #The default format is yyyy-mm-dd
+all_trips$month <- format(as.Date(all_trips$date), "%m")
+all_trips$day <- format(as.Date(all_trips$date), "%d")
+all_trips$year <- format(as.Date(all_trips$date), "%Y")
+all_trips$day_of_week <- format(as.Date(all_trips$date), "%A")
+all_trips$time_start <- format(all_trips$started_at, "%H:%M:%S") # Timepart
+glimpse(all_trips)
+```
+
+Add a "ride_length" calculation to all_trips (in seconds) <https://stat.ethz.ch/R-manual/R-devel/library/base/html/difftime.html>
+
+```{r}
+
+all_trips$ride_length <- difftime(all_trips$ended_at,all_trips$started_at)
+```
+
+Inspect the structure of the columns
+
+```{r}
+
+str(all_trips)
+```
+
+Convert "ride_length" to numeric so we can run calculations on the data
+
+```{r}
+
+is.factor(all_trips$ride_length)
+all_trips$ride_length <- as.numeric(as.character(all_trips$ride_length))
+is.numeric(all_trips$ride_length)
+
+
+```
+
+Remove "bad" data
+
+```{r}
+table(all_trips$start_station_name == "HQ QR")
+table(all_trips$ride_length < 0)
+
+```
+
+The dataframe includes a few hundred entries when bikes were taken out of docks and #checked for quality by Divvy or ride_length was negative.
+
+We will create a new version of the dataframe (v2) since data is being removed <https://www.datasciencemadesimple.com/delete-or-drop-rows-in-r-with-conditions-2/>
+
+```{r}
+
+all_trips_v2 <- all_trips[!(all_trips$start_station_name == "HQ QR" | all_trips$ride_length<0),]
+table(all_trips_v2$start_station_name == "HQ QR")
+table(all_trips_v2$ride_length < 0)
+glimpse(all_trips_v2)
+# Check column names in the dataset
+colnames(all_trips_v2)
+```
+
+
+
+# C. Analysis Phase
+
+**STEP 4: CONDUCT DESCRIPTIVE ANALYSIS**
+
+Descriptive analysis on ride_length (all figures in seconds)
+
+```{r}
+
+mean(all_trips_v2$ride_length) #straight average (total ride length / rides)
+median(all_trips_v2$ride_length) #midpoint number in the ascending array of ride lengths
+max(all_trips_v2$ride_length) #longest ride
+min(all_trips_v2$ride_length) #shortest ride
+
+```
+
+Compare members and casual users
+
+```{r}
+
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = mean)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = median)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = max)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = min)
+
+```
+
+
+Users distribution
+
+
+
+```{r}
+
+member_casual_percen <- all_trips_v2 |>
+  group_by(member_casual) |>
+  summarise( total= n()) |>
+  mutate(totals = sum(total)) %>%
+group_by(member_casual) %>%
+summarise(total_percent = total / totals) %>%
+mutate(labels = scales::percent(total_percent))
+head(member_casual_percen)
+```
+
+See the average ride time by each day for members vs casual users
+
+```{r}
+
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+
+```
+
+Notice that the days of the week are out of order. Let's fix that.
+
+```{r}
+
+all_trips_v2$day_of_week <- ordered(all_trips_v2$day_of_week, levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+```
+
+Analyze ridership data by type and weekday. To see behavior of users on weekend
+
+```{r}
+
+all_trips_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>%  #creates weekday field using wday()
+  group_by(member_casual, weekday) %>%  #groups by usertype and weekday
+  summarise(number_of_rides = n()							#calculates the number of rides and average duration 
+            ,average_duration = mean(ride_length)) %>% 		# calculates the average duration
+  arrange(member_casual, weekday)								# sorts
+
+```
+
+
+# D.Visualization Phase
+
+**Users Pie chart**
+
+```{r}
+member_casual_percen %>%
+ggplot(aes(x="",y=total_percent, fill=member_casual)) +
+geom_bar(stat = "identity", width = 1)+
+coord_polar("y", start=0)+
+theme_minimal()+
+theme(axis.title.x= element_blank(),
+axis.title.y = element_blank(),
+panel.border = element_blank(),
+panel.grid = element_blank(),
+axis.ticks = element_blank(),
+axis.text.x = element_blank(),
+plot.title = element_text(hjust = 0.5, size=14, face = "bold")) +
+scale_fill_manual(values = c("red", "blue")) +
+geom_text(aes(label = labels),
+position = position_stack(vjust = 0.5))+
+labs(title="Users distribution")
+```
+
+Casual riders are only 9% while most of riders are members.
+
+**Visualize the number of rides by rider type**
+
+```{r}
+
+all_trips_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>% 
+  group_by(member_casual, weekday) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>% 
+  arrange(member_casual, weekday)  %>% 
+  ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge") +
+labs(title="Number of rides Vs. Weekday")
+```
+
+Visualization for average duration
+
+```{r}
+
+all_trips_v2 %>% 
+  mutate(weekday = wday(started_at, label = TRUE)) %>% 
+  group_by(member_casual, weekday) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>% 
+   ungroup() %>%  # This removes the grouping
+  arrange(member_casual, weekday)  %>% 
+  ggplot(aes(x = weekday, y = average_duration, fill = member_casual)) +
+  geom_col(position = "dodge") +
+labs(title="Average duration Vs. weekday")
+```
+
+
+Users classes by time
+
+```{r}
+
+all_trips_v2$time_start <- as.POSIXlt(all_trips_v2$time_start, format = "%H:%M:%S", tz = "UTC")
+
+user_classes <- all_trips_v2 %>%
+  mutate(user_type = case_when(
+    format(time_start, "%H:%M:%S") >= "06:00:00" & format(time_start, "%H:%M:%S") < "08:00:00" ~ "Early_Morning",
+    format(time_start, "%H:%M:%S") >= "08:00:00" & format(time_start, "%H:%M:%S") < "09:00:00" ~ "office Time_Morning",
+    format(time_start, "%H:%M:%S") >= "09:00:00" & format(time_start, "%H:%M:%S") < "12:00:00" ~ "Late_Morning",
+    format(time_start, "%H:%M:%S") >= "12:00:00" & format(time_start, "%H:%M:%S") < "17:00:00" ~ "Afternoon",
+    format(time_start, "%H:%M:%S") >= "17:00:00" & format(time_start, "%H:%M:%S") < "18:00:00" ~ "office_Evening",
+    format(time_start, "%H:%M:%S") >= "18:00:00" & format(time_start, "%H:%M:%S") < "24:00:00" ~ "Evening",
+    format(time_start, "%H:%M:%S") >= "00:00:00" & format(time_start, "%H:%M:%S") < "06:00:00" ~ "Night",
+    TRUE ~ "Unknown"  # Default case, just in case there's a time outside the expected ranges
+  ))
+glimpse(user_classes)
+nrow(user_classes)
+```
+
+```{r}
+user_classes1 <- user_classes |>
+  group_by(user_type, member_casual) |>
+summarise(total = sum(n()), avg_ridelength = mean(ride_length), total_ride_length=sum(ride_length) )
+head(user_classes1)
+
+
+
+# Creating the grouped bar plot
+ggplot(user_classes1, aes(x = user_type, y = total, fill = member_casual )) +
+  geom_bar(stat = "identity", position = "dodge") +
+#  scale_fill_manual(values = c("green", "blue")) + # Use scale_fill_manual for custom colors
+  scale_x_discrete(limits = c("Early_Morning", "office Time_Morning", "Late_Morning", "Afternoon", "office_Evening", "Evening", "Night")) + # Custom order for x-axis
+  ggtitle("Users Vrs. Day Segments") +
+  xlab("Categories") +
+  ylab("No. of users") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+Again it is shown that members are far more than casual users.
+
+
+```{r}
+# Creating the grouped bar plot
+ggplot(user_classes1, aes(x = user_type, y = avg_ridelength, fill = member_casual )) +
+  geom_bar(stat = "identity", position = "dodge") +
+#  scale_fill_manual(values = c("green", "blue")) + # Use scale_fill_manual for custom colors
+  scale_x_discrete(limits = c("Early_Morning", "office Time_Morning", "Late_Morning", "Afternoon", "office_Evening", "Evening", "Night")) + # Custom order for x-axis
+  ggtitle("Ride length comparison") +
+  xlab("Categories") +
+  ylab("avg_ridelength") +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+Above graph shows that casual users rides are more lengthy than members throughout the day.
+
+```{r}
+# Creating the grouped bar plot
+ggplot(user_classes1, aes(x = user_type, y = total_ride_length, fill = member_casual )) +
+  geom_bar(stat = "identity", position = "dodge") +
+#  scale_fill_manual(values = c("green", "blue")) + # Use scale_fill_manual for custom colors
+  scale_x_discrete(limits = c("Early_Morning", "office Time_Morning", "Late_Morning", "Afternoon", "office_Evening", "Evening", "Night")) + # Custom order for x-axis
+  ggtitle("Total Single Day Ride length comparison") +
+  xlab("Categories") +
+  ylab("avg_ridelength") +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+
+
+
+# E. ACT Phase
+
+## Recommedations
+
+1.As casual riders are already aware of the Cyclistic program and have chosen Cyclistic for their mobility needs so their change to annual member will be easy as compare to new customers.
+
+2.From users distribution pie chart annual members are 91% while casual are 9%. This implies that company gave overall more or equal benefits to member as well as casual riders. To convert casual users into members promotions schemes should focused on members more as compare to single and day riders.
+
+3.From number of rides Vs. weekday plot, number of rides of members are far more throughout the week than casual riders.It seems that members are using this facility for commute to work or go to their job sites because in working days their numbers of rides are more than weekend. While number of rides increased on weekend days for casual riders which implies that they use this facility to explore the city or some other adventures beside their mobility needs . At this moment membership incentive should be offered to casual riders through social media, emails and other proper advertising sources.
+
+4.Some detailed financial benefits worked out and share with casual users for membership as finance analysts already worked out.
+
+5.From Average duration Vs. weekday graph average duration of casual riders is far more than members riders. This suggests two things. Firstly Casual riders not care about financial benefits and they think they required this facility occasional so no need of membership. Secondly they calculated and found trip or day rider options are more saving than membership. Finance analyst can answer this question. In the light of that analysis casual rider can be convinced better for membership.
+
+6.Although causal members are 9% but their ride length is much more than member. Members average maximum ride length is 1000 seconds while causal rider more than 9000 seconds. This suggest new survey whats the hurdles the casual rider feels not becoming member. Manager can help in removing that hurdles.
+
+7.Although casual riders are 9% but their average ride time in a day is almost comparable with the 91% member's ride time. That's why company can be more profitable in converting existing  causal riders. Hence the hypotheses of Director of Marketing is true.
